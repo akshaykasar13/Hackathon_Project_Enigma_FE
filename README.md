@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-The frontend will run on http://localhost:3000
+The frontend will run on http://15.206.213.150:3000
 
 ## Features
 
