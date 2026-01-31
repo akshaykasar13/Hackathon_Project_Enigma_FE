@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+      to bottom,
+      transparent,
+      rgb(var(--background-end-rgb))
+    )
+    rgb(var(--background-start-rgb));
+}
+
+.agent-card {
+  @apply bg-white rounded-lg shadow-md p-4 mb-4 border-l-4;
+}
+
+.agent-card.ingest { @apply border-blue-500; }
+.agent-card.planner { @apply border-purple-500; }
+.agent-card.intent { @apply border-green-500; }
+.agent-card.memory { @apply border-yellow-500; }
+.agent-card.retrieve { @apply border-orange-500; }
+.agent-card.reason { @apply border-pink-500; }
+.agent-card.respond { @apply border-indigo-500; }
+.agent-card.guard { @apply border-red-500; }
+
+.streaming-line {
+  @apply animate-pulse bg-gray-100 rounded p-2 mb-2;
+}
+
