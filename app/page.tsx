@@ -81,7 +81,7 @@ export default function Home() {
     const conversationHistory = conversation.map(m => ({ role: m.role, content: m.content }))
 
     let eventSource: EventSource | null = null
-    const sseUrl = API_BASE ? `${API_BASE}/sse/agent-stream` : 'http://localhost:8000/sse/agent-stream'
+    const sseUrl = API_BASE ? `${API_BASE}/sse/agent-stream` : 'http://15.206.213.150:8000/sse/agent-stream'
     try {
       eventSource = new EventSource(sseUrl)
       eventSource.onmessage = (event) => {
