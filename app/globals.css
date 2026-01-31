@@ -23,13 +23,20 @@ body {
 }
 
 .agent-card.ingest { @apply border-blue-500; }
+.agent-card.ingestion { @apply border-blue-500; }
 .agent-card.planner { @apply border-purple-500; }
 .agent-card.intent { @apply border-green-500; }
 .agent-card.memory { @apply border-yellow-500; }
 .agent-card.retrieve { @apply border-orange-500; }
+.agent-card.retrieval { @apply border-orange-500; }
 .agent-card.reason { @apply border-pink-500; }
+.agent-card.reasoning { @apply border-pink-500; }
 .agent-card.respond { @apply border-indigo-500; }
+.agent-card.response { @apply border-indigo-500; }
 .agent-card.guard { @apply border-red-500; }
+.agent-card.guardrails { @apply border-red-500; }
+.agent-card.system { @apply border-gray-400; }
+.agent-card.error { @apply border-red-600; }
 
 .streaming-line {
   @apply animate-pulse bg-gray-100 rounded p-2 mb-2;

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import axios from 'axios'
-import { Send, MessageSquare, Database, Settings, Activity } from 'lucide-react'
+import { Send, MessageSquare, Database, Activity, Edit2, X } from 'lucide-react'
 
 interface AgentEvent {
   agent: string
@@ -19,18 +19,36 @@ interface Memory {
   metadata?: any
 }
 
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+  result?: any
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || ''
+
 export default function Home() {
   const [ticket, setTicket] = useState('')
+  const [conversation, setConversation] = useState<ChatMessage[]>([])
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [result, setResult] = useState<any>(null)
   const [memories, setMemories] = useState<Memory[]>([])
   const [activeTab, setActiveTab] = useState<'chat' | 'memory' | 'monitoring'>('chat')
   const [isProcessing, setIsProcessing] = useState(false)
+  const [editingMemory, setEditingMemory] = useState<Memory | null>(null)
+  const [editIncident, setEditIncident] = useState('')
+  const [editOutcome, setEditOutcome] = useState('')
   const eventsEndRef = useRef<HTMLDivElement>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [events])
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [conversation])
 
   useEffect(() => {
     loadMemories()
@@ -49,87 +67,72 @@ export default function Home() {
     e.preventDefault()
     if (!ticket.trim() || isProcessing) return
 
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: ticket.trim(),
+      timestamp: new Date().toISOString(),
+    }
+    setConversation(prev => [...prev, userMessage])
+    setTicket('')
     setIsProcessing(true)
     setEvents([])
     setResult(null)
 
-    // Try to connect to SSE for real-time events
+    const conversationHistory = conversation.map(m => ({ role: m.role, content: m.content }))
+
     let eventSource: EventSource | null = null
+    const sseUrl = API_BASE ? `${API_BASE}/sse/agent-stream` : 'http://localhost:8000/sse/agent-stream'
     try {
-      eventSource = new EventSource('http://localhost:8000/sse/agent-stream')
-      
+      eventSource = new EventSource(sseUrl)
       eventSource.onmessage = (event) => {
         try {
-          // SSE sends: {"event": "agent_event", "data": "JSON_STRING"}
-          // So we need to parse event.data which is already a JSON string
           const data = JSON.parse(event.data)
-          
-          // Extract agent name and message
           const agentName = data.agent_name || 'System'
           const message = data.decision || data.tool_name || data.action || data.reasoning || `${agentName} executed`
-          
-          // Only add if we have meaningful data (not just System)
           if (agentName && message) {
             setEvents(prev => {
-              // Avoid duplicates by checking timestamp + agent + message
               const eventKey = `${data.timestamp}-${agentName}-${message.substring(0, 50)}`
-              const exists = prev.some(e => {
-                const eKey = `${e.timestamp}-${e.agent}-${e.message.substring(0, 50)}`
-                return eKey === eventKey
-              })
+              const exists = prev.some(e => `${e.timestamp}-${e.agent}-${e.message.substring(0, 50)}` === eventKey)
               if (exists) return prev
-              
-              console.log('Adding agent event:', agentName, message)
               return [...prev, {
                 agent: agentName,
-                message: message,
+                message,
                 timestamp: data.timestamp || new Date().toISOString(),
-                data: data
+                data,
               }]
             })
           }
         } catch (err) {
-          console.error('Error parsing SSE event:', err, 'Raw data:', event.data)
+          console.error('Error parsing SSE:', err)
         }
       }
-      
-      eventSource.onerror = (error) => {
-        console.warn('SSE connection error, falling back to simulated events:', error)
+      eventSource.onerror = () => {
         eventSource?.close()
         eventSource = null
-        // Fall back to simulated events
         simulateAgentEvents()
       }
     } catch (err) {
-      console.warn('SSE not available, using simulated events:', err)
       simulateAgentEvents()
     }
 
-    // Submit ticket
     try {
-      console.log('Submitting ticket:', ticket)
-      const response = await axios.post('/api/ticket', { ticket })
-      console.log('API Response:', response.data)
+      const response = await axios.post('/api/ticket', {
+        ticket: userMessage.content,
+        conversation_history: conversationHistory,
+      })
       setResult(response.data)
 
-      // Display execution_trace or agent_events from the response (source of truth)
       const trace = response.data?.execution_trace ?? response.data?.agent_events ?? response.data?.trace ?? []
       const rawTrace = Array.isArray(trace) ? trace : (trace?.steps ? trace.steps : [])
       if (rawTrace.length > 0) {
-        const traceEvents: AgentEvent[] = rawTrace.map((step: any) => {
-          const agent = step.agent ?? step.agent_name ?? step.agent_id ?? 'System'
-          const message = step.message ?? step.status ?? step.decision ?? step.action ?? step.reasoning ?? step.output ?? 'Completed'
-          return {
-            agent,
-            message: String(message),
-            timestamp: step.timestamp ?? new Date().toISOString(),
-            data: step,
-          }
-        })
-        // Replace with trace - it's the authoritative backend data (overrides any SSE/simulated events)
+        const traceEvents: AgentEvent[] = rawTrace.map((step: any) => ({
+          agent: step.agent ?? step.agent_name ?? step.agent_id ?? 'System',
+          message: String(step.message ?? step.status ?? step.decision ?? step.action ?? step.reasoning ?? step.output ?? 'Completed'),
+          timestamp: step.timestamp ?? new Date().toISOString(),
+          data: step,
+        }))
         setEvents(traceEvents)
       } else {
-        // Fallback: add single completion event if no trace
         setEvents(prev => [...prev, {
           agent: 'System',
           message: 'Processing complete',
@@ -138,31 +141,36 @@ export default function Home() {
         }])
       }
 
-      // Reload memories
+      const assistantContent = response.data?.response || response.data?.message || JSON.stringify(response.data)
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: response.data?.error ? `Error: ${response.data?.message}` : assistantContent,
+        timestamp: new Date().toISOString(),
+        result: response.data,
+      }
+      setConversation(prev => [...prev, assistantMessage])
       loadMemories()
     } catch (error: any) {
-      console.error('API Error:', error)
-      console.error('Error details:', error.response?.data)
+      const errMsg = error.response?.data?.detail || error.message || 'Failed to process ticket'
       setEvents(prev => [...prev, {
         agent: 'Error',
-        message: error.response?.data?.detail || error.message || 'Failed to process ticket',
-        timestamp: new Date().toISOString()
+        message: errMsg,
+        timestamp: new Date().toISOString(),
       }])
-      setResult({
-        error: true,
-        message: error.response?.data?.detail || error.message || 'Failed to process ticket'
-      })
+      setResult({ error: true, message: errMsg })
+      setConversation(prev => [...prev, {
+        role: 'assistant',
+        content: `Error: ${errMsg}`,
+        timestamp: new Date().toISOString(),
+        result: { error: true },
+      }])
     } finally {
-      // Close SSE connection
-      if (eventSource) {
-        eventSource.close()
-      }
+      eventSource?.close()
       setIsProcessing(false)
     }
   }
 
   const simulateAgentEvents = () => {
-    // Fallback: Simulate live streaming of agent events
     const agentFlow = [
       { agent: 'IngestionAgent', message: 'Processing input...' },
       { agent: 'PlannerAgent', message: 'Planning execution strategy...' },
@@ -173,14 +181,9 @@ export default function Home() {
       { agent: 'ResponseAgent', message: 'Generating response...' },
       { agent: 'GuardrailsAgent', message: 'Applying safety checks...' },
     ]
-
-    // Stream agent events
     agentFlow.forEach((event, i) => {
       setTimeout(() => {
-        setEvents(prev => [...prev, {
-          ...event,
-          timestamp: new Date().toISOString()
-        }])
+        setEvents(prev => [...prev, { ...event, timestamp: new Date().toISOString() }])
       }, i * 500)
     })
   }
@@ -194,6 +197,72 @@ export default function Home() {
     }
   }
 
+  const openEditMemory = (memory: Memory) => {
+    setEditingMemory(memory)
+    setEditIncident(memory.incident)
+    setEditOutcome(memory.outcome)
+  }
+
+  const closeEditMemory = () => {
+    setEditingMemory(null)
+    setEditIncident('')
+    setEditOutcome('')
+  }
+
+  const saveMemory = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingMemory) return
+    try {
+      await axios.patch(`/api/memory/episodic/${editingMemory.id}`, {
+        incident: editIncident,
+        outcome: editOutcome,
+      })
+      loadMemories()
+      closeEditMemory()
+    } catch (error) {
+      console.error('Failed to update memory:', error)
+    }
+  }
+
+  const clearConversation = () => {
+    setConversation([])
+    setEvents([])
+    setResult(null)
+  }
+
+  const renderToolUsage = (data: any) => {
+    const toolName = data.tool_name ?? data.tool ?? data.function_name
+    const input = data.input ?? data.args ?? data.parameters
+    const output = data.output ?? data.result ?? data.response
+    if (!toolName && !input && !output) return null
+    return (
+      <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-sm space-y-2">
+        {toolName && (
+          <div>
+            <span className="font-semibold text-slate-600">Tool:</span>{' '}
+            <code className="bg-slate-200 px-1 rounded">{String(toolName)}</code>
+          </div>
+        )}
+        {input != null && (typeof input !== 'object' || Object.keys(input).length > 0) && (
+          <div>
+            <span className="font-semibold text-slate-600">Input:</span>
+            <pre className="mt-1 p-2 bg-white rounded text-xs overflow-auto max-h-24">
+              {typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input)}
+            </pre>
+          </div>
+        )}
+        {output != null && (
+          <div>
+            <span className="font-semibold text-slate-600">Output:</span>
+            <pre className="mt-1 p-2 bg-white rounded text-xs overflow-auto max-h-32">
+              {typeof output === 'object' ? JSON.stringify(output, null, 2) : String(output)}
+            </pre>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 py-8">
@@ -201,50 +270,82 @@ export default function Home() {
           🤖 Collaborative Agent System
         </h1>
 
-        {/* Tabs */}
         <div className="flex gap-4 mb-6 border-b">
           <button
             onClick={() => setActiveTab('chat')}
-            className={`px-4 py-2 font-semibold ${
+            className={`px-4 py-2 font-semibold flex items-center ${
               activeTab === 'chat' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600'
             }`}
           >
-            <MessageSquare className="inline mr-2" size={18} />
+            <MessageSquare className="mr-2" size={18} />
             Chat & Agents
           </button>
           <button
             onClick={() => setActiveTab('memory')}
-            className={`px-4 py-2 font-semibold ${
+            className={`px-4 py-2 font-semibold flex items-center ${
               activeTab === 'memory' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600'
             }`}
           >
-            <Database className="inline mr-2" size={18} />
+            <Database className="mr-2" size={18} />
             Memory Management
           </button>
           <button
             onClick={() => setActiveTab('monitoring')}
-            className={`px-4 py-2 font-semibold ${
+            className={`px-4 py-2 font-semibold flex items-center ${
               activeTab === 'monitoring' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-600'
             }`}
           >
-            <Activity className="inline mr-2" size={18} />
+            <Activity className="mr-2" size={18} />
             Monitoring
           </button>
         </div>
 
-        {/* Chat Tab */}
         {activeTab === 'chat' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Input Section */}
-            <div className="lg:col-span-1">
+            <div className="lg:col-span-1 space-y-4">
               <div className="bg-white rounded-lg shadow-lg p-6">
-                <h2 className="text-xl font-semibold mb-4">Submit Ticket</h2>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">Conversation</h2>
+                  {conversation.length > 0 && (
+                    <button
+                      onClick={clearConversation}
+                      className="text-sm text-gray-500 hover:text-red-600"
+                    >
+                      Clear chat
+                    </button>
+                  )}
+                </div>
+                <div className="h-48 overflow-y-auto mb-4 border rounded-lg p-3 bg-gray-50 space-y-3">
+                  {conversation.length === 0 && !isProcessing && (
+                    <p className="text-gray-500 text-sm">No messages yet. Start a conversation below.</p>
+                  )}
+                  {conversation.map((msg, i) => (
+                    <div
+                      key={i}
+                      className={`p-2 rounded-lg text-sm ${
+                        msg.role === 'user'
+                          ? 'bg-blue-100 ml-4 border-l-2 border-blue-400'
+                          : 'bg-green-50 mr-4 border-l-2 border-green-400'
+                      }`}
+                    >
+                      <span className="font-semibold text-xs text-gray-600">{msg.role === 'user' ? 'You' : 'Assistant'}</span>
+                      <p className="mt-0.5 break-words">{msg.content}</p>
+                    </div>
+                  ))}
+                  {isProcessing && (
+                    <div className="flex items-center text-gray-500 text-sm">
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600 mr-2" />
+                      Thinking...
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
                 <form onSubmit={handleSubmit}>
                   <textarea
                     value={ticket}
                     onChange={(e) => setTicket(e.target.value)}
-                    placeholder="Enter your ticket or query..."
-                    className="w-full h-32 p-3 border rounded-lg mb-4 resize-none"
+                    placeholder="Enter your ticket or follow-up..."
+                    className="w-full h-24 p-3 border rounded-lg mb-4 resize-none"
                     disabled={isProcessing}
                   />
                   <button
@@ -253,14 +354,13 @@ export default function Home() {
                     className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center"
                   >
                     <Send className="mr-2" size={18} />
-                    {isProcessing ? 'Processing...' : 'Submit Ticket'}
+                    {isProcessing ? 'Processing...' : 'Send'}
                   </button>
                 </form>
               </div>
 
-              {/* Result Section */}
               {result && (
-                <div className="bg-white rounded-lg shadow-lg p-6 mt-6">
+                <div className="bg-white rounded-lg shadow-lg p-6">
                   <h2 className="text-xl font-semibold mb-4">Result</h2>
                   {result.error ? (
                     <div className="p-4 bg-red-50 border border-red-200 rounded">
@@ -269,12 +369,22 @@ export default function Home() {
                   ) : (
                     <div className="space-y-2">
                       {result.priority && (
-                        <p><strong>Priority:</strong> <span className={`px-2 py-1 rounded ${result.priority === 'HIGH' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{result.priority}</span></p>
+                        <p><strong>Priority:</strong>{' '}
+                          <span className={`px-2 py-1 rounded ${result.priority === 'HIGH' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                            {result.priority}
+                          </span>
+                        </p>
                       )}
                       {result.action && (
-                        <p><strong>Action:</strong> <span className={`px-2 py-1 rounded ${result.action === 'ESCALATE' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>{result.action}</span></p>
+                        <p><strong>Action:</strong>{' '}
+                          <span className={`px-2 py-1 rounded ${result.action === 'ESCALATE' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                            {result.action}
+                          </span>
+                        </p>
                       )}
-                      {result.confidence && <p><strong>Confidence:</strong> {(result.confidence * 100).toFixed(1)}%</p>}
+                      {result.confidence != null && (
+                        <p><strong>Confidence:</strong> {(result.confidence * 100).toFixed(1)}%</p>
+                      )}
                       {result.response && (
                         <div className="mt-4">
                           <strong>Response:</strong>
@@ -284,7 +394,9 @@ export default function Home() {
                       {!result.priority && !result.action && !result.response && (
                         <div className="mt-4">
                           <strong>Full Response:</strong>
-                          <pre className="mt-2 p-3 bg-gray-50 rounded text-xs overflow-auto max-h-64">{JSON.stringify(result, null, 2)}</pre>
+                          <pre className="mt-2 p-3 bg-gray-50 rounded text-xs overflow-auto max-h-64">
+                            {JSON.stringify(result, null, 2)}
+                          </pre>
                         </div>
                       )}
                     </div>
@@ -293,16 +405,18 @@ export default function Home() {
               )}
             </div>
 
-            {/* Agent Events Stream */}
             <div className="lg:col-span-2">
               <div className="bg-white rounded-lg shadow-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Live Agent Stream</h2>
                 <div className="h-[600px] overflow-y-auto">
                   {events.length === 0 && !isProcessing && (
-                    <p className="text-gray-500 text-center py-8">No events yet. Submit a ticket to see agent activity.</p>
+                    <p className="text-gray-500 text-center py-8">No events yet. Send a message to see agent activity.</p>
                   )}
                   {events.map((event, idx) => (
-                    <div key={idx} className={`agent-card ${event.agent.toLowerCase().replace('agent', '').trim()}`}>
+                    <div
+                      key={idx}
+                      className={`agent-card ${(event.agent.toLowerCase().replace(/agent$/i, '').trim() || 'system')}`}
+                    >
                       <div className="flex justify-between items-start mb-2">
                         <span className="font-semibold text-gray-800">{event.agent}</span>
                         <span className="text-xs text-gray-500">
@@ -310,9 +424,10 @@ export default function Home() {
                         </span>
                       </div>
                       <p className="text-gray-700">{event.message}</p>
+                      {event.data && renderToolUsage(event.data)}
                       {event.data && (
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-sm text-blue-600">View details</summary>
+                          <summary className="cursor-pointer text-sm text-blue-600">View raw details</summary>
                           <pre className="mt-2 p-2 bg-gray-50 rounded text-xs overflow-auto">
                             {JSON.stringify(event.data, null, 2)}
                           </pre>
@@ -321,11 +436,9 @@ export default function Home() {
                     </div>
                   ))}
                   {isProcessing && (
-                    <div className="streaming-line">
-                      <div className="flex items-center">
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                        <span className="text-gray-600">Processing...</span>
-                      </div>
+                    <div className="streaming-line flex items-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2" />
+                      <span className="text-gray-600">Processing...</span>
                     </div>
                   )}
                   <div ref={eventsEndRef} />
@@ -335,7 +448,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Memory Management Tab */}
         {activeTab === 'memory' && (
           <div className="bg-white rounded-lg shadow-lg p-6">
             <div className="flex justify-between items-center mb-6">
@@ -357,13 +469,13 @@ export default function Home() {
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800 mb-2">{memory.incident}</p>
                         <p className="text-gray-600 text-sm mb-2">{memory.outcome}</p>
-                        <div className="flex gap-2 mt-2">
+                        <div className="flex gap-2 mt-2 flex-wrap">
                           {memory.metadata?.priority && (
                             <span className={`px-2 py-1 rounded text-xs ${memory.metadata.priority === 'HIGH' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
                               {memory.metadata.priority}
                             </span>
                           )}
-                          {memory.metadata?.confidence && (
+                          {memory.metadata?.confidence != null && (
                             <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
                               Confidence: {(memory.metadata.confidence * 100).toFixed(0)}%
                             </span>
@@ -373,12 +485,21 @@ export default function Home() {
                           {new Date(memory.timestamp).toLocaleString()}
                         </p>
                       </div>
-                      <button
-                        onClick={() => deleteMemory(memory.id)}
-                        className="ml-4 px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-                      >
-                        Delete
-                      </button>
+                      <div className="flex gap-2 ml-4">
+                        <button
+                          onClick={() => openEditMemory(memory)}
+                          className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-sm flex items-center"
+                        >
+                          <Edit2 size={14} className="mr-1" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteMemory(memory.id)}
+                          className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -387,7 +508,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Monitoring Tab */}
         {activeTab === 'monitoring' && (
           <div className="bg-white rounded-lg shadow-lg p-6">
             <h2 className="text-xl font-semibold mb-4">System Monitoring</h2>
@@ -406,11 +526,64 @@ export default function Home() {
                   {isProcessing ? 'Processing' : 'Ready'}
                 </p>
               </div>
+              <div className="md:col-span-3 bg-slate-50 rounded-lg p-4">
+                <h3 className="font-semibold text-slate-800">Conversation Turns</h3>
+                <p className="text-2xl font-bold text-slate-600">{conversation.length}</p>
+              </div>
             </div>
           </div>
         )}
       </div>
+
+      {editingMemory && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Edit Memory</h3>
+              <button onClick={closeEditMemory} className="text-gray-500 hover:text-gray-700">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={saveMemory} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Incident</label>
+                <textarea
+                  value={editIncident}
+                  onChange={(e) => setEditIncident(e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                  rows={3}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Outcome</label>
+                <textarea
+                  value={editOutcome}
+                  onChange={(e) => setEditOutcome(e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                  rows={3}
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeEditMemory}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
-
