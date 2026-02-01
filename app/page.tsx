@@ -1599,7 +1599,7 @@ export default function Home() {
                       <ul className="text-sm text-teal-900 space-y-1 max-h-32 overflow-y-auto">
                         {observabilityLlmCalls.slice(0, 10).map((call: any, i: number) => (
                           <li key={i}>
-                            {call.agent_name ?? call.agent}: {call.operation ?? call.model} — {call.total_tokens ?? call.prompt_tokens + call.completion_tokens ?? '—'} tokens
+                            {call.agent_name ?? call.agent}: {call.operation ?? call.model} — {(call.total_tokens ?? (call.prompt_tokens != null && call.completion_tokens != null ? call.prompt_tokens + call.completion_tokens : undefined)) ?? '—'} tokens
                             {call.cost_usd != null ? `, $${Number(call.cost_usd).toFixed(4)}` : ''}
                           </li>
                         ))}
