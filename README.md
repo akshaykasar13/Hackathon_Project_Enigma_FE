@@ -28,6 +28,15 @@ Backend runs on **port 80** (no port in URL). API docs: [http://15.206.213.150/d
 
 **Testing from local against deployed backend:** Set `NEXT_PUBLIC_API_BASE_URL=http://15.206.213.150` in `.env.local` and run `npm run dev`. Restart the dev server after changing env vars.
 
+### Deployment (UI calling BE)
+
+The frontend calls the backend **via its own API routes** (e.g. `/api/health`, `/api/ticket`). Those routes use `NEXT_PUBLIC_API_BASE_URL` at **runtime**. If this is not set where the app runs, it falls back to `http://localhost:8000` and requests fail.
+
+- **Docker:** The Dockerfile sets `ENV NEXT_PUBLIC_API_BASE_URL=http://15.206.213.150` by default. Override with `-e NEXT_PUBLIC_API_BASE_URL=<your-backend-url>` if needed.
+- **Bare Node (`npm run start`):** Put `NEXT_PUBLIC_API_BASE_URL=http://15.206.213.150` in `.env.production` in the app directory, or set it in the process (e.g. `NEXT_PUBLIC_API_BASE_URL=http://15.206.213.150 npm run start` or in your process manager).
+
+After redeploying, check `GET http://<frontend-host>:3000/api/health`; it should return `ok: true` and `backend: "http://15.206.213.150/health"`.
+
 ### Verifying backend connectivity
 
 1. **Backend up:** Open [http://15.206.213.150/docs](http://15.206.213.150/docs) in a browser (or `curl http://15.206.213.150/health`).
