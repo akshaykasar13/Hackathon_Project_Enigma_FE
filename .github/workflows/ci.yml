@@ -1,27 +1,32 @@
-name: Frontend CI (POC)
+name: Deploy Frontend (POC)
 
 on:
   push:
-    branches: [ POC ]
-  pull_request:
-    branches: [ POC ]
+    branches:
+      - POC
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Deploy Frontend to EC2
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          node-version: '18'
-          cache: 'npm'
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd Hackathon_Project_Enigma_FE
+            git checkout POC
+            git pull origin POC
 
-      - name: Install dependencies
-        run: npm install
+            docker stop enigma-frontend || true
+            docker rm enigma-frontend || true
 
-      - name: Build frontend
-        run: npm run build
+            docker build -t enigma-frontend .
+            docker run -d \
+              --name enigma-frontend \
+              -p 3000:3000 \
+              -e NEXT_PUBLIC_API_BASE_URL=http://15.206.213.150:8000 \
+              enigma-frontend
