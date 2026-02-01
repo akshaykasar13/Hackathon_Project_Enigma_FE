@@ -39,6 +39,21 @@ body {
 .agent-card.error { @apply border-red-600; }
 
 .streaming-line {
-  @apply animate-pulse bg-gray-100 rounded p-2 mb-2;
+  @apply rounded-lg;
+}
+
+@keyframes agent-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agent-card-in {
+  animation: agent-card-in 0.25s ease-out;
 }
 
