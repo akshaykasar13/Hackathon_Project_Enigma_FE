@@ -54,3 +54,4 @@ See **[REQUIREMENTS_COVERAGE.md](./REQUIREMENTS_COVERAGE.md)** for a mapping of 
 - **Observability:** Ensure the backend returns fields the UI uses (e.g. `execution_trace`, `sources`, `retrieved_context`, `plan`, `action`, `confidence`). API docs: [http://15.206.213.150/docs](http://15.206.213.150/docs).
 - **Quick guide:** Add a **QUICK_GUIDE.md** (or section in the backend README) that describes: how to run the backend, ingest/chunking, where each agent’s code lives, and how observability is logged and exposed. The frontend “Requirements & quick guide” panel references this.
 
+# test
