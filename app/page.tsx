@@ -117,6 +117,10 @@ export default function Home() {
   const [observabilityTrace, setObservabilityTrace] = useState<{ task_id: string; execution_trace?: any[]; agent_events?: any[] } | null>(null)
   const [observabilityLlmCalls, setObservabilityLlmCalls] = useState<any[]>([])
   const [observabilityLoading, setObservabilityLoading] = useState(false)
+  const [observabilityLastUpdated, setObservabilityLastUpdated] = useState<Date | null>(null)
+  const [monitoringSectionOpen, setMonitoringSectionOpen] = useState<Record<string, boolean>>({
+    aiMetrics: true, executionTrace: true, events: true, toolCalls: true, llmCalls: true,
+  })
 
   const completedPipelineSteps = events.length
     ? Array.from(
@@ -266,8 +270,8 @@ export default function Home() {
       .catch(() => setBackendStatus('error'))
   }, [activeTab])
 
-  useEffect(() => {
-    if (activeTab !== 'monitoring' || backendStatus !== 'ok') return
+  const loadObservability = () => {
+    if (backendStatus !== 'ok') return
     setObservabilityLoading(true)
     const base = '/api/observability'
     Promise.all([
@@ -281,8 +285,14 @@ export default function Home() {
         setObservabilityEvents(Array.isArray(eventsRes?.events) ? eventsRes.events : [])
         setObservabilityToolCalls(Array.isArray(toolCallsRes?.tool_calls) ? toolCallsRes.tool_calls : [])
         setObservabilityLlmCalls(Array.isArray(llmCallsRes?.llm_calls) ? llmCallsRes.llm_calls : [])
+        setObservabilityLastUpdated(new Date())
       })
       .finally(() => setObservabilityLoading(false))
+  }
+
+  useEffect(() => {
+    if (activeTab !== 'monitoring' || backendStatus !== 'ok') return
+    loadObservability()
   }, [activeTab, backendStatus])
 
   useEffect(() => {
@@ -1460,19 +1470,57 @@ export default function Home() {
 
               {backendStatus === 'ok' && (
                 <>
+                  <div className="md:col-span-3 flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-slate-100 border border-slate-200">
+                    <span className="font-medium text-slate-700">Backend observability</span>
+                    <div className="flex items-center gap-3 text-sm">
+                      {observabilityLastUpdated && !observabilityLoading && (
+                        <span className="text-slate-500">Last updated: {observabilityLastUpdated.toLocaleTimeString()}</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={loadObservability}
+                        disabled={observabilityLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Refresh observability data"
+                      >
+                        {observabilityLoading ? (
+                          <span className="inline-block w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Activity size={16} />
+                        )}
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
                   {observabilityLoading && (
                     <div className="md:col-span-3 text-sm text-slate-500 flex items-center gap-2">
                       <span className="inline-block w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
                       Loading backend observability…
                     </div>
                   )}
+                  {!observabilityLoading && !aiMetricsSummary && observabilityEvents.length === 0 && observabilityToolCalls.length === 0 && observabilityLlmCalls.length === 0 && !(observabilityTrace?.execution_trace?.length) && (
+                    <div className="md:col-span-3 p-4 rounded-lg bg-slate-50 border border-slate-200 text-center text-slate-600 text-sm">
+                      <p className="font-medium mb-1">No observability data yet</p>
+                      <p>Run a ticket in <strong>Chat & Agents</strong> to see AI metrics, events, tool calls, and execution traces here. Click <strong>Refresh</strong> after a run to load the latest data.</p>
+                    </div>
+                  )}
                   {aiMetricsSummary && !observabilityLoading && (
-                    <div className="md:col-span-3 bg-indigo-50 rounded-lg p-4 space-y-3">
-                      <h3 className="font-semibold text-indigo-800 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="md:col-span-3 bg-indigo-50 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringSectionOpen((s) => ({ ...s, aiMetrics: !s.aiMetrics }))}
+                        className="w-full flex items-center justify-between gap-2 flex-wrap p-4 text-left font-semibold text-indigo-800 hover:bg-indigo-100/50"
+                        aria-expanded={monitoringSectionOpen.aiMetrics}
+                      >
                         <span className="flex items-center gap-2">
                           <Activity size={16} />
                           AI metrics (backend)
                         </span>
+                        {monitoringSectionOpen.aiMetrics ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </button>
+                      {monitoringSectionOpen.aiMetrics && (
+                      <div className="px-4 pb-4 space-y-3">
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
                         <button
                           type="button"
                           onClick={() => {
@@ -1494,7 +1542,7 @@ export default function Home() {
                           <Download size={12} />
                           Export AI metrics
                         </button>
-                      </h3>
+                      </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                         {(aiMetricsSummary.total_llm_calls != null || aiMetricsSummary.total_tokens != null) && (
                           <>
@@ -1549,11 +1597,23 @@ export default function Home() {
                           </ul>
                         </div>
                       )}
+                      </div>
+                      )}
                     </div>
                   )}
                   {observabilityTrace?.execution_trace && observabilityTrace.execution_trace.length > 0 && !observabilityLoading && (
-                    <div className="md:col-span-3 bg-violet-50 rounded-lg p-4 space-y-2">
-                      <h3 className="font-semibold text-violet-800">Execution trace (task: {observabilityTrace.task_id?.slice(0, 8)}…)</h3>
+                    <div className="md:col-span-3 bg-violet-50 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringSectionOpen((s) => ({ ...s, executionTrace: !s.executionTrace }))}
+                        className="w-full flex items-center justify-between gap-2 p-4 text-left font-semibold text-violet-800 hover:bg-violet-100/50"
+                        aria-expanded={monitoringSectionOpen.executionTrace}
+                      >
+                        Execution trace (task: {observabilityTrace.task_id?.slice(0, 8)}…)
+                        {monitoringSectionOpen.executionTrace ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </button>
+                      {monitoringSectionOpen.executionTrace && (
+                      <div className="px-4 pb-4 space-y-2">
                       <ul className="text-sm text-violet-900 space-y-1">
                         {observabilityTrace.execution_trace.slice(0, 15).map((step: any, i: number) => (
                           <li key={i}>
@@ -1564,11 +1624,23 @@ export default function Home() {
                           <li className="text-violet-600">… +{observabilityTrace.execution_trace.length - 15} more</li>
                         )}
                       </ul>
+                      </div>
+                      )}
                     </div>
                   )}
                   {observabilityEvents.length > 0 && !observabilityLoading && (
-                    <div className="md:col-span-3 bg-sky-50 rounded-lg p-4 space-y-2">
-                      <h3 className="font-semibold text-sky-800">Recent events (backend)</h3>
+                    <div className="md:col-span-3 bg-sky-50 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringSectionOpen((s) => ({ ...s, events: !s.events }))}
+                        className="w-full flex items-center justify-between gap-2 p-4 text-left font-semibold text-sky-800 hover:bg-sky-100/50"
+                        aria-expanded={monitoringSectionOpen.events}
+                      >
+                        Recent events (backend) — {observabilityEvents.length}
+                        {monitoringSectionOpen.events ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </button>
+                      {monitoringSectionOpen.events && (
+                      <div className="px-4 pb-4 space-y-2 max-h-48 overflow-y-auto">
                       <ul className="text-sm text-sky-900 space-y-1 max-h-40 overflow-y-auto">
                         {observabilityEvents.slice(0, 20).map((ev: any, i: number) => (
                           <li key={i}>
@@ -1577,11 +1649,23 @@ export default function Home() {
                         ))}
                         {observabilityEvents.length > 20 && <li className="text-sky-600">… +{observabilityEvents.length - 20} more</li>}
                       </ul>
+                      </div>
+                      )}
                     </div>
                   )}
                   {observabilityToolCalls.length > 0 && !observabilityLoading && (
-                    <div className="md:col-span-3 bg-amber-50 rounded-lg p-4 space-y-2">
-                      <h3 className="font-semibold text-amber-800">Tool calls (backend)</h3>
+                    <div className="md:col-span-3 bg-amber-50 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringSectionOpen((s) => ({ ...s, toolCalls: !s.toolCalls }))}
+                        className="w-full flex items-center justify-between gap-2 p-4 text-left font-semibold text-amber-800 hover:bg-amber-100/50"
+                        aria-expanded={monitoringSectionOpen.toolCalls}
+                      >
+                        Tool calls (backend) — {observabilityToolCalls.length}
+                        {monitoringSectionOpen.toolCalls ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </button>
+                      {monitoringSectionOpen.toolCalls && (
+                      <div className="px-4 pb-4 space-y-2 max-h-40 overflow-y-auto">
                       <ul className="text-sm text-amber-900 space-y-1 max-h-32 overflow-y-auto">
                         {observabilityToolCalls.slice(0, 15).map((tc: any, i: number) => (
                           <li key={i}>
@@ -1591,11 +1675,23 @@ export default function Home() {
                         ))}
                         {observabilityToolCalls.length > 15 && <li className="text-amber-600">… +{observabilityToolCalls.length - 15} more</li>}
                       </ul>
+                      </div>
+                      )}
                     </div>
                   )}
                   {observabilityLlmCalls.length > 0 && !observabilityLoading && (
-                    <div className="md:col-span-3 bg-teal-50 rounded-lg p-4 space-y-2">
-                      <h3 className="font-semibold text-teal-800">Recent LLM calls (backend)</h3>
+                    <div className="md:col-span-3 bg-teal-50 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringSectionOpen((s) => ({ ...s, llmCalls: !s.llmCalls }))}
+                        className="w-full flex items-center justify-between gap-2 p-4 text-left font-semibold text-teal-800 hover:bg-teal-100/50"
+                        aria-expanded={monitoringSectionOpen.llmCalls}
+                      >
+                        Recent LLM calls (backend) — {observabilityLlmCalls.length}
+                        {monitoringSectionOpen.llmCalls ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </button>
+                      {monitoringSectionOpen.llmCalls && (
+                      <div className="px-4 pb-4 space-y-2 max-h-40 overflow-y-auto">
                       <ul className="text-sm text-teal-900 space-y-1 max-h-32 overflow-y-auto">
                         {observabilityLlmCalls.slice(0, 10).map((call: any, i: number) => (
                           <li key={i}>
@@ -1605,6 +1701,8 @@ export default function Home() {
                         ))}
                         {observabilityLlmCalls.length > 10 && <li className="text-teal-600">… +{observabilityLlmCalls.length - 10} more</li>}
                       </ul>
+                      </div>
+                      )}
                     </div>
                   )}
                 </>
